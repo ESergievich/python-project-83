@@ -1,8 +1,14 @@
-from flask import Flask, render_template
+from flask import Flask, render_template, request, flash, redirect, get_flashed_messages, url_for
+import psycopg2
+from psycopg2.extras import NamedTupleCursor
 import os
 from dotenv import load_dotenv
+from urllib.parse import urlparse
+import validators
 
 load_dotenv()
+DATABASE_URL = os.getenv('DATABASE_URL')
+conn = psycopg2.connect(DATABASE_URL)
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY')
@@ -10,8 +16,57 @@ app.config['SECRET_KEY'] = os.getenv('SECRET_KEY')
 
 @app.route('/')
 def index():
-    return render_template('index.html')
+    messages = get_flashed_messages(with_categories=True)
+    return render_template('index.html', messages=messages)
 
 
-# if __name__ == 'main':
-#     app.run(debug=True)
+@app.route('/urls', methods=['GET', 'POST'])
+def show_sites():
+    messages = get_flashed_messages(with_categories=True)
+    if request.method == 'POST':
+        url = request.form.get('url')
+        host = f"{urlparse(url).scheme}://{urlparse(url).netloc}"
+        if validators.url(url) and len(url) <= 255:
+            try:
+                with conn:
+                    with conn.cursor() as curs:
+                        query = "(SELECT * FROM urls WHERE name = %s)"
+                        curs.execute(query, (host,))
+                        row = curs.fetchone()
+                        if not row:
+                            curs.execute('INSERT INTO urls (name) VALUES (%s)', (host,))
+                            flash('Страница успешно добавлена', 'success')
+                        else:
+                            flash('Страница уже существует', 'warning')
+                        curs.execute('SELECT id FROM urls WHERE name=%s', (host,))
+                        id = curs.fetchone()[0]
+                        return redirect(url_for('show_site', id=id))
+            except Exception as e:
+                print(f"An error occurred: {e}")
+        else:
+            flash('Некорректный URL', 'error')
+            return redirect(url_for('index'))
+
+    try:
+        with conn:
+            with conn.cursor(cursor_factory=NamedTupleCursor) as curs:
+                curs.execute('SELECT * FROM urls')
+                urls = curs.fetchall()
+    except Exception as e:
+        print(f"An error occurred: {e}")
+
+    return render_template('sites.html', urls=urls, messages=messages)
+
+
+@app.route('/urls/<id>')
+def show_site(id):
+    messages = get_flashed_messages(with_categories=True)
+    try:
+        with conn:
+            with conn.cursor(cursor_factory=NamedTupleCursor) as curs:
+                curs.execute('SELECT * FROM urls WHERE id=%s', (id,))
+                url = curs.fetchone()
+    except Exception as e:
+        print(f"An error occurred: {e}")
+
+    return render_template('site_info.html', url=url, messages=messages)

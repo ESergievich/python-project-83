@@ -5,6 +5,7 @@ import os
 from dotenv import load_dotenv
 from urllib.parse import urlparse
 import validators
+import requests
 
 load_dotenv()
 DATABASE_URL = os.getenv('DATABASE_URL')
@@ -50,14 +51,17 @@ def show_sites():
     try:
         with conn:
             with conn.cursor(cursor_factory=NamedTupleCursor) as curs:
-                query = "SELECT urls.id, urls.name, latest_url_checks.created_at, latest_url_checks.status_code " \
-                        "FROM urls " \
-                        "LEFT JOIN ( " \
-                        "   SELECT url_id, created_at, status_code " \
-                        "   FROM url_checks " \
-                        "   ORDER BY created_at DESC " \
-                        "   LIMIT 1) AS latest_url_checks " \
-                        "ON urls.id = latest_url_checks.url_id"
+                query = "SELECT u.id, u.name, ch.created_at, ch.status_code " \
+                        "FROM urls AS u " \
+                        "LEFT JOIN (" \
+                        "   SELECT u_c.url_id, u_c.created_at, u_c.status_code " \
+                        "   FROM url_checks AS u_c " \
+                        "   JOIN (" \
+                        "       SELECT url_id, MAX(created_at) AS created_at " \
+                        "       FROM url_checks" \
+                        "       GROUP BY url_id" \
+                        "   ) AS l_u_c ON u_c.url_id = l_u_c.url_id AND u_c.created_at = l_u_c.created_at" \
+                        ") AS ch ON u.id = ch.url_id"
                 curs.execute(query)
                 urls = curs.fetchall()
     except Exception as e:
@@ -87,9 +91,17 @@ def start_check(id):
     try:
         with conn:
             with conn.cursor(cursor_factory=NamedTupleCursor) as curs:
-                query = "INSERT INTO url_checks (url_id) VALUES (%s)"
+                query = "SELECT name FROM urls WHERE id=%s"
                 curs.execute(query, (id,))
+                url = curs.fetchone()[0]
+                r = requests.get(url, timeout=1)
+                r.raise_for_status()
+                status_code = r.status_code
+                query = "INSERT INTO url_checks (url_id, status_code) VALUES (%s, %s)"
+                curs.execute(query, (id, status_code))
                 flash('Страница успешно проверена', 'success')
                 return redirect(url_for('show_site', id=id))
     except Exception as e:
         print(f"An error occurred: {e}")
+        flash('Произошла ошибка при проверке', 'error')
+        return redirect(url_for('show_site', id=id))

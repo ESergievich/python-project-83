@@ -50,7 +50,15 @@ def show_sites():
     try:
         with conn:
             with conn.cursor(cursor_factory=NamedTupleCursor) as curs:
-                curs.execute('SELECT * FROM urls')
+                query = "SELECT urls.id, urls.name, latest_url_checks.created_at, latest_url_checks.status_code " \
+                        "FROM urls " \
+                        "LEFT JOIN ( " \
+                        "   SELECT url_id, created_at, status_code " \
+                        "   FROM url_checks " \
+                        "   ORDER BY created_at DESC " \
+                        "   LIMIT 1) AS latest_url_checks " \
+                        "ON urls.id = latest_url_checks.url_id"
+                curs.execute(query)
                 urls = curs.fetchall()
     except Exception as e:
         print(f"An error occurred: {e}")
@@ -66,7 +74,22 @@ def show_site(id):
             with conn.cursor(cursor_factory=NamedTupleCursor) as curs:
                 curs.execute('SELECT * FROM urls WHERE id=%s', (id,))
                 url = curs.fetchone()
+                curs.execute('SELECT * FROM url_checks WHERE url_id=%s', (id,))
+                checks = curs.fetchall()
     except Exception as e:
         print(f"An error occurred: {e}")
 
-    return render_template('site_info.html', url=url, messages=messages)
+    return render_template('site_info.html', url=url, checks=checks, messages=messages)
+
+
+@app.route('/urls/<id>/checks', methods=['POST'])
+def start_check(id):
+    try:
+        with conn:
+            with conn.cursor(cursor_factory=NamedTupleCursor) as curs:
+                query = "INSERT INTO url_checks (url_id) VALUES (%s)"
+                curs.execute(query, (id,))
+                flash('Страница успешно проверена', 'success')
+                return redirect(url_for('show_site', id=id))
+    except Exception as e:
+        print(f"An error occurred: {e}")

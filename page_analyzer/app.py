@@ -33,8 +33,8 @@ def show_sites():
             url_id = get_url_by_param('name', host).id
             return redirect(url_for('show_site', id=url_id))
         else:
-            flash('Некорректный URL', 'alert alert-danger')
-            return redirect(url_for('index'))
+            messages = [('alert alert-danger', 'Некорректный URL')]
+            return render_template('index.html', url=url, messages=messages), 422
 
     urls = get_all_urls_with_max_cr_at()
     return render_template('sites.html', urls=urls, messages=messages)
